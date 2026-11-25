@@ -1,0 +1,26 @@
+name: Test Notification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send test notification
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          test -n "$NTFY_TOPIC" || exit 1
+
+          curl --fail-with-body --silent --show-error \
+            -H "Title: Camellia Watch - TEST" \
+            -H "Priority: urgent" \
+            -H "Tags: ship,bell" \
+            -H "Click: https://5rpg55g4nz-cell.github.io/camellia-watch/" \
+            -d "通知テスト成功。これは空席通知ではありません。" \
+            "https://ntfy.sh/${NTFY_TOPIC}"
