@@ -1,0 +1,67 @@
+name: Test Availability
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_date:
+        description: 'Test departure date'
+        required: true
+        default: '2026-12-15'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Set temporary test date
+        env:
+          TEST_DATE: ${{ inputs.test_date }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import date
+
+          test_date = os.environ["TEST_DATE"]
+          date.fromisoformat(test_date)
+
+          with open("config.json", encoding="utf-8") as f:
+              config = json.load(f)
+
+          config["departure_date"] = test_date
+
+          with open("config.json", "w", encoding="utf-8") as f:
+              json.dump(config, f, ensure_ascii=False, indent=2)
+
+          print("TEST DATE:", test_date)
+          PY
+
+      - name: Test availability
+        run: python check_stock.py
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: availability-test
+          path: |
+            booking-page.png
+            stock.json
+          retention-days: 1
