@@ -24,13 +24,5 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      - name: Test cabins
-        run: python test_cabins.py
-
-      - name: Upload screenshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cabin-test
-          path: booking-page.png
-          retention-days: 1
+      - name: Analyze booking validation
+        run: python test_booking.py
