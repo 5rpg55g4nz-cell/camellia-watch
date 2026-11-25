@@ -24,8 +24,8 @@ jobs:
       - name: Check monitoring period
         id: period
         run: |
-          TODAY=$(TZ=Asia/Tokyo date +%Y-%m-%d)
-          if [[ "$TODAY" > "2026-12-26" ]]; then
+          NOW=$(TZ=Asia/Tokyo date +%Y%m%d%H%M)
+          if [[ "$NOW" > "202612271000" ]]; then
             echo "active=false" >> "$GITHUB_OUTPUT"
           else
             echo "active=true" >> "$GITHUB_OUTPUT"
@@ -49,7 +49,15 @@ jobs:
       - name: Check availability
         id: stock
         if: steps.period.outputs.active == 'true'
-        run: python check_stock.py
+        run: |
+          rm -f stock.json
+          python check_stock.py
+
+      - name: Send vacancy notification
+        if: steps.stock.outcome == 'success'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python notify.py
 
       - name: Save stock data
         if: always() && steps.period.outputs.active == 'true'
