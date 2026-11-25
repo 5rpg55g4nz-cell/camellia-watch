@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -7,11 +8,13 @@ from playwright.sync_api import sync_playwright
 with open("config.json", encoding="utf-8") as f:
     config = json.load(f)
 
+target = config["departure_date"]
+
 result = {
     "checked_at": datetime.now(
         ZoneInfo("Asia/Tokyo")
     ).isoformat(),
-    "departure_date": config["departure_date"],
+    "departure_date": target,
     "departure": config["departure"],
     "destination": config["destination"],
     "adults": config["adults"],
@@ -23,7 +26,9 @@ result = {
 
 try:
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True
+        )
 
         page = browser.new_page(
             locale="ja-JP",
@@ -43,122 +48,171 @@ try:
                 timeout=60000
             )
 
-            page.wait_for_timeout(2000)
-
             print("PAGE TITLE:", page.title())
-            print("PAGE URL:", page.url)
 
+            # 片道
             one_way = page.locator(
                 'input[name="oufuku"][value="1"]'
             )
             one_way.check()
 
+            # 博多 → 釜山
             route = page.locator(
                 'select[name="ow"]'
             )
             route.select_option("1")
 
-            print("ONE WAY:", one_way.is_checked())
-            print("ROUTE:", route.input_value())
-
+            # カレンダーを開く
             date_field = page.locator(
                 'input[name="ow_date"]'
             )
+            date_field.click()
 
-            print("DATE INPUT HTML:")
-            print(date_field.evaluate(
+            # 解析済みの日付属性を使用
+            day = page.locator(
+                '#set_calendar '
+                f'dd.enable[data-ymd="{target}"]'
+                ':visible'
+            )
+
+            day.wait_for(
+                state="visible",
+                timeout=10000
+            )
+
+            if day.count() != 1:
+                raise RuntimeError(
+                    "対象日を一意に特定できません"
+                )
+
+            print("DAY HTML:")
+            print(day.evaluate(
                 "e => e.outerHTML"
             ))
 
-            print("DATE BEFORE:", date_field.input_value())
+            day.click()
 
-            date_field.click()
-            page.wait_for_timeout(2000)
+            # 選択された日付を確認
+            date_value = date_field.input_value()
 
-            print("VISIBLE PAGE TEXT START")
-            print(page.locator("body").inner_text())
-            print("VISIBLE PAGE TEXT END")
+            print("SELECTED DATE:", date_value)
 
-            # カレンダーの親要素を取得
-            buttons = page.locator(
-                ".btn-next.next:visible"
+            digits = re.sub(
+                r"[^0-9]", "", date_value
             )
 
-            print("CALENDAR NEXT BUTTONS:", buttons.count())
+            expected = target.replace("-", "")
 
-            for i, button in enumerate(buttons.all()):
-                print("CALENDAR HTML START:", i)
+            if digits != expected:
+                raise RuntimeError(
+                    "日付設定エラー: " + date_value
+                )
 
-                html = button.evaluate("""
-                    e => {
-                        let node = e;
-                        for (let i = 0; i < 4; i++) {
-                            if (node.parentElement) {
-                                node = node.parentElement;
-                            }
-                        }
-                        return node.outerHTML;
-                    }
-                """)
+            # 人数設定
+            number = page.locator(
+                'input[name="number"]'
+            )
 
-                print(html[:60000])
-                print("CALENDAR HTML END")
+            adults = str(config["adults"])
 
-            # 日付候補の要素を取得
-            candidates = page.locator("body *").evaluate_all("""
+            if number.input_value() != adults:
+                number.fill(adults)
+                number.press("Tab")
+
+            # 検索直前の条件確認
+            if not one_way.is_checked():
+                raise RuntimeError(
+                    "片道設定エラー"
+                )
+
+            if route.input_value() != "1":
+                raise RuntimeError(
+                    "航路設定エラー"
+                )
+
+            if number.input_value() != adults:
+                raise RuntimeError(
+                    "人数設定エラー"
+                )
+
+            if re.sub(
+                r"[^0-9]", "",
+                date_field.input_value()
+            ) != expected:
+                raise RuntimeError(
+                    "日付の再確認に失敗"
+                )
+
+            print("SEARCH CONDITIONS VERIFIED")
+            print("TRIP: ONE WAY")
+            print("ROUTE: HAKATA -> BUSAN")
+            print("DATE:", date_value)
+            print("PASSENGERS:", adults)
+
+            page.screenshot(
+                path="booking-page.png",
+                full_page=True
+            )
+
+            # 空席検索ボタン
+            search = page.get_by_role(
+                "button",
+                name="検索",
+                exact=True
+            )
+
+            if search.count() != 1:
+                raise RuntimeError(
+                    "検索ボタンを特定できません"
+                )
+
+            search.click()
+
+            page.wait_for_timeout(8000)
+
+            print("RESULT URL:", page.url)
+            print("RESULT TITLE:", page.title())
+
+            print("RESULT TEXT START")
+
+            body_text = page.locator(
+                "body"
+            ).inner_text()
+
+            print(body_text)
+
+            print("RESULT TEXT END")
+
+            # 客室・料金・予約ボタンの解析
+            elements = page.locator(
+                "table, select, button, "
+                "input, a, .alert"
+            ).evaluate_all("""
                 elements => elements
                   .filter(e =>
-                    e.getClientRects().length &&
-                    getComputedStyle(e).visibility
-                      !== 'hidden' &&
-                    e.children.length === 0 &&
-                    /^\\d{1,2}$/.test(
-                      (e.textContent || '').trim()
-                    )
+                    e.getClientRects().length
                   )
-                  .slice(0, 200)
                   .map(e => ({
-                      text: e.textContent.trim(),
-                      html: e.outerHTML,
-                      parent: e.parentElement
-                        ? e.parentElement.outerHTML
-                            .slice(0, 1500)
-                        : ''
+                    tag: e.tagName,
+                    text: (e.innerText || '').trim(),
+                    id: e.id || '',
+                    name: e.name || '',
+                    value: e.value || '',
+                    disabled: !!e.disabled,
+                    html: e.outerHTML.slice(0, 12000)
                   }))
             """)
 
-            print("DAY ELEMENTS START")
+            print("RESULT ELEMENTS START")
             print(json.dumps(
-                candidates,
+                elements,
                 ensure_ascii=False,
                 indent=2
             ))
-            print("DAY ELEMENTS END")
-
-            # カレンダー関連ライブラリの確認
-            libraries = page.evaluate("""
-                () => ({
-                    jquery: typeof window.jQuery,
-                    datepicker: !!(
-                        window.jQuery &&
-                        window.jQuery.fn.datepicker
-                    ),
-                    flatpickr: typeof window.flatpickr,
-                    scripts: Array.from(
-                        document.scripts
-                    ).map(s => s.src).filter(Boolean)
-                })
-            """)
-
-            print("LIBRARIES:")
-            print(json.dumps(
-                libraries,
-                ensure_ascii=False,
-                indent=2
-            ))
+            print("RESULT ELEMENTS END")
 
             result["message"] = (
-                "カレンダー詳細解析完了・空席未照会"
+                "検索操作完了・空席判定未検証"
             )
 
         finally:
