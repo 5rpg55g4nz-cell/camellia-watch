@@ -1,4 +1,5 @@
 import json
+import traceback
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from playwright.sync_api import sync_playwright
@@ -28,7 +29,11 @@ try:
 
         page = browser.new_page(
             locale="ja-JP",
-            timezone_id="Asia/Tokyo"
+            timezone_id="Asia/Tokyo",
+            viewport={
+                "width": 1280,
+                "height": 1000
+            }
         )
 
         page.goto(
@@ -40,43 +45,46 @@ try:
         page.wait_for_timeout(5000)
 
         print("PAGE TITLE:", page.title())
-        print("PAGE URL:", page.url())
-
-        fields = page.locator(
-            "input, select, button, a"
-        ).evaluate_all("""
-            elements => elements
-              .filter(e => e.getClientRects().length)
-              .map(e => ({
-                tag: e.tagName,
-                type: e.type,
-                id: e.id,
-                name: e.name,
-                value: e.value,
-                text: e.innerText,
-                placeholder: e.placeholder,
-                options: e.tagName === 'SELECT'
-                  ? Array.from(e.options).map(o => ({
-                      text: o.text,
-                      value: o.value
-                    }))
-                  : []
-              }))
-        """)
-
-        print(json.dumps(
-            fields,
-            ensure_ascii=False,
-            indent=2
-        ))
+        print("PAGE URL:", page.url)
 
         page.screenshot(
             path="booking-page.png",
             full_page=True
         )
 
+        for i, frame in enumerate(page.frames):
+            print("\nFRAME:", i)
+            print("FRAME URL:", frame.url)
+
+            fields = frame.locator(
+                "input, select, button, a"
+            ).evaluate_all("""
+                elements => elements.map(e => ({
+                    tag: e.tagName,
+                    type: e.type || "",
+                    id: e.id || "",
+                    name: e.name || "",
+                    value: e.value || "",
+                    text: e.innerText || "",
+                    placeholder: e.placeholder || "",
+                    visible: !!e.getClientRects().length,
+                    options: e.tagName === 'SELECT'
+                      ? Array.from(e.options).map(o => ({
+                          text: o.text,
+                          value: o.value
+                        }))
+                      : []
+                }))
+            """)
+
+            print(json.dumps(
+                fields,
+                ensure_ascii=False,
+                indent=2
+            ))
+
         result["message"] = (
-            "予約ページ取得済み・空席未照会"
+            "予約フォーム取得済み・空席未照会"
         )
 
         browser.close()
@@ -85,17 +93,24 @@ except Exception as e:
     result["status"] = "error"
     result["message"] = str(e)
     print("ERROR:", e)
+    traceback.print_exc()
 
-with open("stock.json", "w", encoding="utf-8") as f:
-    json.dump(
+finally:
+    with open(
+        "stock.json", "w", encoding="utf-8"
+    ) as f:
+        json.dump(
+            result,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    print(json.dumps(
         result,
-        f,
         ensure_ascii=False,
         indent=2
-    )
+    ))
 
-print(json.dumps(
-    result,
-    ensure_ascii=False,
-    indent=2
-))
+if result["status"] == "error":
+    raise SystemExit(1)
