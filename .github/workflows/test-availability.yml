@@ -2,12 +2,6 @@ name: Test Availability
 
 on:
   workflow_dispatch:
-    inputs:
-      test_date:
-        description: 'Test departure date'
-        required: true
-        default: '2026-12-15'
-        type: string
 
 permissions:
   contents: read
@@ -30,38 +24,13 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      - name: Set temporary test date
-        env:
-          TEST_DATE: ${{ inputs.test_date }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from datetime import date
+      - name: Test cabins
+        run: python test_cabins.py
 
-          test_date = os.environ["TEST_DATE"]
-          date.fromisoformat(test_date)
-
-          with open("config.json", encoding="utf-8") as f:
-              config = json.load(f)
-
-          config["departure_date"] = test_date
-
-          with open("config.json", "w", encoding="utf-8") as f:
-              json.dump(config, f, ensure_ascii=False, indent=2)
-
-          print("TEST DATE:", test_date)
-          PY
-
-      - name: Test availability
-        run: python check_stock.py
-
-      - name: Upload test results
+      - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: availability-test
-          path: |
-            booking-page.png
-            stock.json
+          name: cabin-test
+          path: booking-page.png
           retention-days: 1
