@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Camellia">
+<title>Camellia Watch</title>
+
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --text: #1d1d1f;
+  --sub: #86868b;
+  --line: #e5e5ea;
+  --blue: #007aff;
+  --green: #30b85a;
+  --red: #ff453a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --text: #f5f5f7;
+    --sub: #98989d;
+    --line: #38383a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", sans-serif;
+}
+
+main {
+  max-width: 600px;
+  margin: auto;
+  padding: 24px 16px 50px;
+}
+
+h1 {
+  font-size: 32px;
+  letter-spacing: -1.5px;
+  margin: 8px 0;
+}
+
+.subtitle {
+  color: var(--sub);
+  font-size: 13px;
+}
+
+.card {
+  background: var(--card);
+  padding: 22px;
+  border-radius: 22px;
+  margin-top: 16px;
+}
+
+.route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.center { text-align: center; }
+
+.status {
+  font-size: 32px;
+  font-weight: 750;
+  margin: 15px 0;
+}
+
+.red { color: var(--red); }
+.green { color: var(--green); }
+.gray { color: var(--sub); }
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.metrics .card {
+  padding: 18px;
+}
+
+.metric {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.room {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.room:last-child {
+  border-bottom: none;
+}
+
+.room-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.price {
+  font-size: 13px;
+  color: var(--sub);
+  margin-top: 6px;
+}
+
+.room-status {
+  font-size: 12px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+button, .booking {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  padding: 15px;
+  background: var(--blue);
+  color: white;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-top: 16px;
+  cursor: pointer;
+}
+
+.refresh {
+  background: var(--card);
+  color: var(--blue);
+}
+
+#warning {
+  font-size: 13px;
+  color: #e59b20;
+  margin-top: 12px;
+}
+</style>
+</head>
+
+<body>
+<main>
+
+<div class="subtitle">FERRY AVAILABILITY MONITOR</div>
+<h1>Camellia Watch</h1>
+<div class="subtitle">Hakata — Busan</div>
+
+<section class="card">
+  <div class="route">
+    <span>博多</span>
+    <span class="gray">→</span>
+    <span>釜山</span>
+  </div>
+
+  <p class="center subtitle">
+    2026年12月27日（日）｜片道｜大人2名
+  </p>
+</section>
+
+<section class="card center">
+  <div class="subtitle">AVAILABILITY</div>
+  <div id="status" class="status gray">
+    LOADING
+  </div>
+  <div id="message" class="subtitle">
+    空席データを読み込み中
+  </div>
+  <div id="warning"></div>
+</section>
+
+<div class="metrics">
+  <section class="card">
+    <div class="subtitle">CHECK INTERVAL</div>
+    <div class="metric">5 min</div>
+  </section>
+
+  <section class="card">
+    <div class="subtitle">LAST CHECK</div>
+    <div id="last" class="metric">--:--</div>
+    <div id="date" class="subtitle"></div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="subtitle">CABIN AVAILABILITY</div>
+  <div id="rooms"></div>
+</section>
+
+<a class="booking"
+   href="https://www.camellia-line.co.jp/rs/?country=1"
+   target="_blank" rel="noopener">
+  公式予約サイト
+</a>
+
+<button class="refresh" onclick="loadStock()">
+  表示を更新
+</button>
+
+<p class="center subtitle">
+  画面は60秒ごとに自動更新されます。<br>
+  空席照会はGitHub Actionsで実行します。
+</p>
+
+</main>
+
+<script>
+const roomNames = {
+  "161": "2等室",
+  "157": "2等寝台",
+  "162": "1等和室A",
+  "163": "1等洋室B（2名）",
+  "164": "1等洋室C（4名）",
+  "166": "特等ツイン（2名）",
+  "167": "特等ツイン（3名）"
+};
+
+async function loadStock() {
+  const status = document.getElementById("status");
+  const message = document.getElementById("message");
+  const warning = document.getElementById("warning");
+  const rooms = document.getElementById("rooms");
+
+  try {
+    const response = await fetch(
+      "./stock.json?t=" + Date.now(),
+      { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+      throw new Error("データ取得失敗");
+    }
+
+    const data = await response.json();
+    const checked = new Date(data.checked_at);
+
+    const time = checked.toLocaleTimeString(
+      "ja-JP",
+      {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        minute: "2-digit"
+      }
+    );
+
+    document.getElementById("last").textContent = time;
+
+    document.getElementById("date").textContent =
+      checked.toLocaleDateString("ja-JP", {
+        timeZone: "Asia/Tokyo"
+      });
+
+    const age = Date.now() - checked.getTime();
+    const stale = !Number.isFinite(age) ||
+      age > 15 * 60 * 1000;
+
+    warning.textContent = stale
+      ? "最終照会から15分以上経過、または時刻不明"
+      : "";
+
+    status.className = "status gray";
+
+    if (stale) {
+      status.textContent = "STALE";
+    } else if (
+      data.status === "available" &&
+      data.available === true
+    ) {
+      status.textContent = "AVAILABLE";
+      status.className = "status green";
+    } else if (data.status === "sold_out") {
+      status.textContent = "SOLD OUT";
+      status.className = "status red";
+    } else if (data.status === "error") {
+      status.textContent = "ERROR";
+    } else {
+      status.textContent = "UNKNOWN";
+    }
+
+    message.textContent =
+      data.message || "空席状況未確認";
+
+    rooms.replaceChildren();
+
+    for (const room of data.rooms || []) {
+      const row = document.createElement("div");
+      row.className = "room";
+
+      const info = document.createElement("div");
+
+      const name = document.createElement("div");
+      name.className = "room-name";
+      name.textContent =
+        roomNames[room.id] || room.room;
+
+      const price = document.createElement("div");
+      price.className = "price";
+      price.textContent = room.price || "料金不明";
+
+      info.append(name, price);
+
+      const badge = document.createElement("div");
+      badge.className = "room-status gray";
+
+      if (stale) {
+        badge.textContent = "情報更新待ち";
+      } else if (room.status === "available") {
+        badge.textContent = "空席あり";
+        badge.className = "room-status green";
+      } else if (room.status === "sold_out") {
+        badge.textContent = "売り切れ";
+        badge.className = "room-status red";
+      } else if (room.status === "ineligible") {
+        badge.textContent = "人数条件対象外";
+      } else {
+        badge.textContent = "未確認";
+      }
+
+      row.append(info, badge);
+      rooms.append(row);
+    }
+
+  } catch (error) {
+    status.textContent = "ERROR";
+    status.className = "status gray";
+    message.textContent = error.message;
+    warning.textContent = "最新情報を取得できません";
+    rooms.replaceChildren();
+  }
+}
+
+loadStock();
+setInterval(loadStock, 60000);
+</script>
+
+</body>
+</html>
