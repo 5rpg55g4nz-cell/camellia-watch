@@ -9,15 +9,15 @@ with open("config.json", encoding="utf-8") as f:
     config = json.load(f)
 
 target = config["departure_date"]
+adults = config["adults"]
+timezone = ZoneInfo("Asia/Tokyo")
 
 result = {
-    "checked_at": datetime.now(
-        ZoneInfo("Asia/Tokyo")
-    ).isoformat(),
+    "checked_at": None,
     "departure_date": target,
     "departure": config["departure"],
     "destination": config["destination"],
-    "adults": config["adults"],
+    "adults": adults,
     "status": "unknown",
     "available": None,
     "rooms": [],
@@ -26,9 +26,7 @@ result = {
 
 try:
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True
-        )
+        browser = p.chromium.launch(headless=True)
 
         page = browser.new_page(
             locale="ja-JP",
@@ -48,172 +46,177 @@ try:
                 timeout=60000
             )
 
-            print("PAGE TITLE:", page.title())
-
-            # 片道
             one_way = page.locator(
                 'input[name="oufuku"][value="1"]'
             )
             one_way.check()
 
-            # 博多 → 釜山
             route = page.locator(
                 'select[name="ow"]'
             )
             route.select_option("1")
 
-            # カレンダーを開く
             date_field = page.locator(
                 'input[name="ow_date"]'
             )
             date_field.click()
 
-            # 解析済みの日付属性を使用
             day = page.locator(
                 '#set_calendar '
                 f'dd.enable[data-ymd="{target}"]'
                 ':visible'
             )
-
-            day.wait_for(
-                state="visible",
-                timeout=10000
-            )
-
-            if day.count() != 1:
-                raise RuntimeError(
-                    "対象日を一意に特定できません"
-                )
-
-            print("DAY HTML:")
-            print(day.evaluate(
-                "e => e.outerHTML"
-            ))
-
+            day.wait_for(state="visible")
             day.click()
 
-            # 選択された日付を確認
-            date_value = date_field.input_value()
-
-            print("SELECTED DATE:", date_value)
-
-            digits = re.sub(
-                r"[^0-9]", "", date_value
-            )
-
-            expected = target.replace("-", "")
-
-            if digits != expected:
-                raise RuntimeError(
-                    "日付設定エラー: " + date_value
-                )
-
-            # 人数設定
             number = page.locator(
                 'input[name="number"]'
             )
 
-            adults = str(config["adults"])
-
-            if number.input_value() != adults:
-                number.fill(adults)
+            if number.input_value() != str(adults):
+                number.fill(str(adults))
                 number.press("Tab")
 
-            # 検索直前の条件確認
             if not one_way.is_checked():
-                raise RuntimeError(
-                    "片道設定エラー"
-                )
+                raise RuntimeError("片道設定エラー")
 
             if route.input_value() != "1":
-                raise RuntimeError(
-                    "航路設定エラー"
-                )
+                raise RuntimeError("航路設定エラー")
 
-            if number.input_value() != adults:
-                raise RuntimeError(
-                    "人数設定エラー"
-                )
+            if date_field.input_value() != target:
+                raise RuntimeError("日付設定エラー")
 
-            if re.sub(
-                r"[^0-9]", "",
-                date_field.input_value()
-            ) != expected:
-                raise RuntimeError(
-                    "日付の再確認に失敗"
-                )
+            if number.input_value() != str(adults):
+                raise RuntimeError("人数設定エラー")
 
-            print("SEARCH CONDITIONS VERIFIED")
-            print("TRIP: ONE WAY")
-            print("ROUTE: HAKATA -> BUSAN")
-            print("DATE:", date_value)
-            print("PASSENGERS:", adults)
-
-            page.screenshot(
-                path="booking-page.png",
-                full_page=True
-            )
-
-            # 空席検索ボタン
-            search = page.get_by_role(
+            page.get_by_role(
                 "button",
                 name="検索",
                 exact=True
+            ).click()
+
+            page.wait_for_url(
+                "**/idv/reservation**",
+                timeout=30000
             )
 
-            if search.count() != 1:
-                raise RuntimeError(
-                    "検索ボタンを特定できません"
-                )
+            page.locator(
+                "table.table01 tr.plan"
+            ).first.wait_for(state="attached")
 
-            search.click()
+            text = page.locator("body").inner_text()
 
-            page.wait_for_timeout(8000)
+            if target not in text or "博多発" not in text:
+                raise RuntimeError("検索結果の日付・航路不一致")
 
-            print("RESULT URL:", page.url)
-            print("RESULT TITLE:", page.title())
+            passenger_count = page.locator(
+                "#renumber"
+            ).input_value()
 
-            print("RESULT TEXT START")
+            if passenger_count != str(adults):
+                raise RuntimeError("検索結果の人数不一致")
 
-            body_text = page.locator(
-                "body"
-            ).inner_text()
+            # 非表示の客室プランも取得
+            rows = page.locator(
+                "table.table01 tr.plan"
+            )
 
-            print(body_text)
+            plans = rows.evaluate_all("""
+                rows => rows.map(row => {
+                    const cells = Array.from(row.cells);
+                    const rc = row.querySelector(
+                        'input.room-charge'
+                    );
 
-            print("RESULT TEXT END")
-
-            # 客室・料金・予約ボタンの解析
-            elements = page.locator(
-                "table, select, button, "
-                "input, a, .alert"
-            ).evaluate_all("""
-                elements => elements
-                  .filter(e =>
-                    e.getClientRects().length
-                  )
-                  .map(e => ({
-                    tag: e.tagName,
-                    text: (e.innerText || '').trim(),
-                    id: e.id || '',
-                    name: e.name || '',
-                    value: e.value || '',
-                    disabled: !!e.disabled,
-                    html: e.outerHTML.slice(0, 12000)
-                  }))
+                    return {
+                        id: row.dataset.trplan || '',
+                        name: row.querySelector(
+                            '.plan-name'
+                        )?.textContent.trim() || '',
+                        room: cells[2]?.textContent.trim() || '',
+                        price: cells[3]?.textContent.trim() || '',
+                        availability: cells[4]?.textContent.trim() || '',
+                        room_charge: rc?.value || '',
+                        room_count: rc?.dataset.roomnum || '',
+                        min_capacity: rc?.dataset.mincapa || '',
+                        capacity: rc?.dataset.capa || '',
+                        html: row.outerHTML
+                    };
+                })
             """)
 
-            print("RESULT ELEMENTS START")
-            print(json.dumps(
-                elements,
-                ensure_ascii=False,
-                indent=2
-            ))
-            print("RESULT ELEMENTS END")
+            if not plans:
+                raise RuntimeError("客室情報を取得できません")
 
-            result["message"] = (
-                "検索操作完了・空席判定未検証"
-            )
+            for plan in plans:
+                availability = plan["availability"]
+
+                if "売り切れ" in availability:
+                    status = "sold_out"
+
+                elif "ご指定の人数では" in availability:
+                    status = "ineligible"
+
+                else:
+                    # 予約可能な画面の構造は
+                    # 未検証のため推測しない
+                    status = "unknown"
+
+                room = {
+                    "id": plan["id"],
+                    "name": plan["name"],
+                    "room": plan["room"],
+                    "price": plan["price"],
+                    "status": status,
+                    "availability": availability,
+                    "room_charge": plan["room_charge"],
+                    "room_count": plan["room_count"],
+                    "min_capacity": plan["min_capacity"],
+                    "capacity": plan["capacity"]
+                }
+
+                result["rooms"].append(room)
+
+                print(json.dumps(
+                    room,
+                    ensure_ascii=False,
+                    indent=2
+                ))
+
+                if status == "unknown":
+                    print("UNVERIFIED PLAN HTML:")
+                    print(plan["html"])
+
+            expected_ids = {
+                "161", "157", "162", "163",
+                "164", "166", "167"
+            }
+
+            found_ids = {
+                room["id"]
+                for room in result["rooms"]
+            }
+
+            if (
+                expected_ids.issubset(found_ids)
+                and all(
+                    room["status"] in (
+                        "sold_out", "ineligible"
+                    )
+                    for room in result["rooms"]
+                )
+            ):
+                result["status"] = "sold_out"
+                result["available"] = False
+                result["message"] = (
+                    "大人2名で予約可能なプランなし"
+                )
+            else:
+                result["status"] = "unknown"
+                result["available"] = None
+                result["message"] = (
+                    "空席判定に追加確認が必要"
+                )
 
         finally:
             try:
@@ -228,12 +231,15 @@ try:
 
 except Exception as e:
     result["status"] = "error"
+    result["available"] = None
     result["message"] = str(e)
-
-    print("ERROR:", e)
     traceback.print_exc()
 
 finally:
+    result["checked_at"] = datetime.now(
+        timezone
+    ).isoformat()
+
     with open(
         "stock.json", "w", encoding="utf-8"
     ) as f:
