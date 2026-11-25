@@ -8,6 +8,10 @@ from playwright.sync_api import sync_playwright
 with open("config.json", encoding="utf-8") as f:
     config = json.load(f)
 
+target = datetime.strptime(
+    config["departure_date"], "%Y-%m-%d"
+)
+
 result = {
     "checked_at": datetime.now(
         ZoneInfo("Asia/Tokyo")
@@ -22,7 +26,50 @@ result = {
     "message": "空席未確認"
 }
 
-page = None
+
+def check_date(field):
+    value = field.input_value()
+    print("SELECTED DATE:", value)
+
+    digits = re.sub(r"[^0-9]", "", value)
+
+    return digits == target.strftime("%Y%m%d")
+
+
+def calendar_debug(page):
+    print("CALENDAR DEBUG START")
+
+    items = page.locator(
+        "input, button, a, td, th, select, "
+        "[data-date], [aria-label]"
+    ).evaluate_all("""
+        elements => elements
+          .filter(e =>
+              e.getClientRects().length &&
+              getComputedStyle(e).visibility
+                  !== 'hidden'
+          )
+          .slice(0, 350)
+          .map(e => ({
+              tag: e.tagName,
+              text: (e.innerText || '').trim(),
+              id: e.id || '',
+              class: String(e.className || ''),
+              name: e.name || '',
+              title: e.title || '',
+              date: e.getAttribute('data-date'),
+              aria: e.getAttribute('aria-label'),
+              disabled: !!e.disabled,
+              readonly: !!e.readOnly
+          }))
+    """)
+
+    print(json.dumps(
+        items, ensure_ascii=False, indent=2
+    ))
+
+    print("CALENDAR DEBUG END")
+
 
 try:
     with sync_playwright() as p:
@@ -35,11 +82,11 @@ try:
             timezone_id="Asia/Tokyo",
             viewport={
                 "width": 1280,
-                "height": 1000
+                "height": 1100
             }
         )
 
-        page.set_default_timeout(15000)
+        page.set_default_timeout(10000)
 
         try:
             page.goto(
@@ -53,50 +100,21 @@ try:
             print("PAGE TITLE:", page.title())
             print("PAGE URL:", page.url)
 
-            # 片道を選択
-            radios = page.locator(
-                'input[name="oufuku"]'
+            # 片道
+            one_way = page.locator(
+                'input[name="oufuku"][value="1"]'
             )
 
-            selected = False
+            one_way.check()
 
-            for radio in radios.all():
-                label = radio.evaluate("""
-                    e => Array.from(e.labels || [])
-                        .map(l => l.innerText)
-                        .join(' ')
-                """)
-
-                print(
-                    "RADIO:",
-                    radio.get_attribute("value"),
-                    label
-                )
-
-                if "片道" in label and "往復" not in label:
-                    radio.check()
-                    selected = True
-                    break
-
-            if not selected:
-                label = page.get_by_text(
-                    "片道", exact=True
-                )
-
-                if label.count() == 1:
-                    label.click()
-                    checked = page.locator(
-                        'input[name="oufuku"]:checked'
-                    )
-
-                    selected = checked.count() == 1
-
-            if not selected:
+            if not one_way.is_checked():
                 raise RuntimeError(
-                    "片道選択を確認できません"
+                    "片道選択エラー"
                 )
 
-            # 博多 → 釜山
+            print("TRIP: ONE WAY")
+
+            # 博多から釜山
             route = page.locator(
                 'select[name="ow"]'
             )
@@ -110,80 +128,127 @@ try:
 
             print("ROUTE: HAKATA -> BUSAN")
 
-            # 出発日
+            # カレンダーを開く
             date_field = page.locator(
                 'input[name="ow_date"]'
             )
 
-            date = datetime.strptime(
-                config["departure_date"],
-                "%Y-%m-%d"
+            date_field.click()
+            page.wait_for_timeout(1000)
+
+            page.screenshot(
+                path="booking-page.png",
+                full_page=True
             )
 
-            if date_field.is_editable():
-                date_field.fill(
-                    date.strftime("%Y/%m/%d")
+            calendar_debug(page)
+
+            # 日付選択候補
+            selectors = [
+                f'[data-date="{target:%Y-%m-%d}"]',
+                f'[data-date="{target:%Y/%m/%d}"]',
+                f'[aria-label="{target:%Y-%m-%d}"]',
+                f'[title="{target:%Y-%m-%d}"]'
+            ]
+
+            found = False
+
+            for selector in selectors:
+                candidates = page.locator(
+                    selector + ":visible"
                 )
-                date_field.press("Tab")
-            else:
-                applied = date_field.evaluate(
-                    """(e, d) => {
-                        const $ = window.jQuery;
-                        if ($ && $.fn.datepicker &&
-                            $(e).hasClass('hasDatepicker')) {
-                            $(e).datepicker(
-                                'setDate',
-                                new Date(
-                                    d.year,
-                                    d.month - 1,
-                                    d.day
+
+                if candidates.count() == 1:
+                    item = candidates.first
+
+                    if item.is_enabled():
+                        try:
+                            item.click(timeout=2000)
+                            page.wait_for_timeout(500)
+
+                            if check_date(date_field):
+                                found = True
+                                break
+
+                        except Exception:
+                            pass
+
+            # Flatpickr形式の場合
+            if not found:
+                calendar = page.locator(
+                    ".flatpickr-calendar.open"
+                )
+
+                if calendar.count() == 1:
+                    for attempt in range(4):
+
+                        month = calendar.locator(
+                            ".flatpickr-monthDropdown-months"
+                        )
+
+                        year = calendar.locator(
+                            ".cur-year"
+                        )
+
+                        if (
+                            month.count() == 1
+                            and year.count() == 1
+                        ):
+                            current_month = int(
+                                month.input_value()
+                            ) + 1
+
+                            current_year = int(
+                                year.input_value()
+                            )
+
+                            if (
+                                current_year == target.year
+                                and current_month == target.month
+                            ):
+                                day = calendar.locator(
+                                    ".flatpickr-day"
+                                    ":not(.prevMonthDay)"
+                                    ":not(.nextMonthDay)"
+                                    ":not(.flatpickr-disabled)"
+                                ).filter(
+                                    has_text=re.compile(
+                                        f"^{target.day}$"
+                                    )
                                 )
-                            );
-                            $(e).trigger('change');
-                            return true;
-                        }
-                        return false;
-                    }""",
-                    {
-                        "year": date.year,
-                        "month": date.month,
-                        "day": date.day
-                    }
-                )
 
-                if not applied:
-                    date_field.click()
-                    raise RuntimeError(
-                        "カレンダー操作の追加解析が必要"
-                    )
+                                if day.count() == 1:
+                                    day.click()
+                                    found = check_date(
+                                        date_field
+                                    )
 
-            date_value = date_field.input_value()
+                                break
 
-            print("DATE:", date_value)
+                            if (
+                                current_year,
+                                current_month
+                            ) > (
+                                target.year,
+                                target.month
+                            ):
+                                break
 
-            normalized = re.sub(
-                r"[^0-9]", "", date_value
-            )
+                            calendar.locator(
+                                ".flatpickr-next-month"
+                            ).click()
 
-            if normalized != date.strftime("%Y%m%d"):
+                            page.wait_for_timeout(400)
+
+                        else:
+                            break
+
+            if not found:
                 raise RuntimeError(
-                    "出発日を確認できません: "
-                    + date_value
+                    "カレンダーの構造確認が必要"
                 )
 
-            # 片道であることを追加確認
-            return_date = page.locator(
-                'input[name="rt_date"]'
-            )
-
-            if (
-                return_date.is_visible()
-                and return_date.is_enabled()
-                and return_date.is_editable()
-            ):
-                raise RuntimeError(
-                    "復路入力欄が有効です"
-                )
+            print("DATE: VERIFIED")
 
             # 人数確認
             number = page.locator(
@@ -197,23 +262,33 @@ try:
                     number.fill(
                         str(config["adults"])
                     )
-                    number.press("Tab")
 
             if number.input_value() != str(
                 config["adults"]
             ):
                 raise RuntimeError(
-                    "人数を確認できません"
+                    "人数設定エラー"
                 )
 
             print("PASSENGERS:", number.input_value())
 
-            page.screenshot(
-                path="booking-page.png",
-                full_page=True
-            )
+            # 検索直前の再確認
+            if not one_way.is_checked():
+                raise RuntimeError(
+                    "片道の再確認に失敗"
+                )
 
-            # 空席検索のみ実行
+            if route.input_value() != "1":
+                raise RuntimeError(
+                    "航路の再確認に失敗"
+                )
+
+            if not check_date(date_field):
+                raise RuntimeError(
+                    "日付の再確認に失敗"
+                )
+
+            # 空席照会のみ実行
             search = page.get_by_role(
                 "button",
                 name="検索",
@@ -227,58 +302,27 @@ try:
             print("RESULT URL:", page.url)
             print("RESULT TITLE:", page.title())
 
-            # 検索結果の解析用ログ
-            for i, frame in enumerate(page.frames):
-                print("FRAME:", i)
+            print("RESULT TEXT START")
+            print(
+                page.locator("body")
+                .inner_text()[:20000]
+            )
+            print("RESULT TEXT END")
 
-                text = frame.locator(
-                    "body"
-                ).inner_text()
-
-                print("RESULT TEXT:")
-                print(text[:20000])
-
-                controls = frame.locator(
-                    "input, select, button, a"
-                ).evaluate_all("""
-                    elements => elements
-                        .filter(e => e.getClientRects().length)
-                        .map(e => ({
-                            tag: e.tagName,
-                            type: e.type || "",
-                            id: e.id || "",
-                            name: e.name || "",
-                            text: e.innerText || "",
-                            disabled: !!e.disabled,
-                            options: e.tagName === 'SELECT'
-                                ? Array.from(e.options).map(o => ({
-                                    text: o.text,
-                                    value: o.value,
-                                    disabled: o.disabled
-                                }))
-                                : []
-                        }))
-                """)
-
-                print(json.dumps(
-                    controls,
-                    ensure_ascii=False,
-                    indent=2
-                ))
+            calendar_debug(page)
 
             result["message"] = (
-                "検索ボタン操作済み・空席判定未検証"
+                "検索実行済み・空席判定未検証"
             )
 
         finally:
-            if page is not None:
-                try:
-                    page.screenshot(
-                        path="booking-page.png",
-                        full_page=True
-                    )
-                except Exception:
-                    pass
+            try:
+                page.screenshot(
+                    path="booking-page.png",
+                    full_page=True
+                )
+            except Exception:
+                pass
 
             browser.close()
 
@@ -291,9 +335,7 @@ except Exception as e:
 
 finally:
     with open(
-        "stock.json",
-        "w",
-        encoding="utf-8"
+        "stock.json", "w", encoding="utf-8"
     ) as f:
         json.dump(
             result,
