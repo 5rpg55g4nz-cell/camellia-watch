@@ -1,0 +1,15 @@
+{
+  "name": "Camellia Watch",
+  "url": "https://www.camellia-line.co.jp/rs/?country=1",
+  "departure_date": "2026-12-27",
+  "departure": "博多",
+  "destination": "釜山",
+  "trip_type": "one_way",
+  "adults": 2,
+  "children": 0,
+  "room_type": "all",
+  "check_interval_minutes": 5,
+  "timezone": "Asia/Tokyo",
+  "notify_only_available": true,
+  "auto_booking": false
+}
