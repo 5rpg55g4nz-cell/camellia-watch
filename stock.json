@@ -1,11 +1,11 @@
 {
-  "checked_at": "2026-11-27T13:32:13.528517+09:00",
+  "checked_at": "2026-11-27T21:31:27.336784+09:00",
   "departure_date": "2026-12-27",
   "departure": "博多",
   "destination": "釜山",
   "adults": 2,
-  "status": "sold_out",
-  "available": false,
+  "status": "candidate",
+  "available": null,
   "rooms": [
     {
       "id": "161",
@@ -13,9 +13,9 @@
       "room": "2等 インターネット割引運賃 Economy Internet discount",
       "price": "13,500円",
       "group": "pill-40",
-      "status": "sold_out",
-      "selected": 0,
-      "remaining": 0,
+      "status": "candidate",
+      "selected": 2,
+      "remaining": 33,
       "remaining_unit": "people",
       "capacity": null
     },
@@ -25,9 +25,9 @@
       "room": "2等寝台 インターネット割引運賃 ECONOMY BED Internet discount",
       "price": "15,000円",
       "group": "pill-40",
-      "status": "sold_out",
-      "selected": 0,
-      "remaining": 0,
+      "status": "candidate",
+      "selected": 2,
+      "remaining": 4,
       "remaining_unit": "people",
       "capacity": null
     },
@@ -63,9 +63,21 @@
       "group": "pill-31",
       "status": "ineligible",
       "selected": 0,
-      "remaining": 0,
+      "remaining": 2,
       "remaining_unit": "rooms",
       "capacity": 5
+    },
+    {
+      "id": "165",
+      "name": "特等シングル SINGLE",
+      "room": "特等シングル SINGLE",
+      "price": "27,000円",
+      "group": "pill-other",
+      "status": "insufficient",
+      "selected": 0,
+      "remaining": 1,
+      "remaining_unit": "rooms",
+      "capacity": 1
     },
     {
       "id": "166",
@@ -92,5 +104,5 @@
       "capacity": 3
     }
   ],
-  "message": "大人2名で予約可能なプランなし"
+  "message": "残席あり・大人2名の選択成功。最終予約可否は未確認"
 }
