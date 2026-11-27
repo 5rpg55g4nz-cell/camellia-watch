@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-27T23:05:45.627050+09:00",
+  "checked_at": "2026-11-27T23:10:51.008689+09:00",
   "departure_date": "2026-12-27",
   "departure": "博多",
   "destination": "釜山",
@@ -15,7 +15,7 @@
       "group": "pill-40",
       "status": "candidate",
       "selected": 2,
-      "remaining": 29,
+      "remaining": 31,
       "remaining_unit": "people",
       "capacity": null
     },
